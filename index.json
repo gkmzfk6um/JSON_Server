@@ -1,0 +1,24 @@
+{
+    "flags": {
+        "ai-design": false,
+        "designprompt": "dark, moody, clean",
+        "nocss": false
+    },
+    "2": {
+        "h1": "title",
+        "p": "This content is dynamically rendered from a JSON file. The order is determined by the file order.",
+        "h3": "Features"
+    },
+    "3": {
+        "ul": [
+            "Fast Go Server",
+            "Dynamic Content",
+            "AI Design Mode"
+        ],
+        "card": "This is a custom card component rendered via template!"
+    },
+    "4": {
+        "h1": "title",
+        "p": "This content is dynamically rendered from a JSON file. The order is determined by the file order."
+    }
+}

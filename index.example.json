@@ -1,0 +1,39 @@
+{
+    "flags": {
+        "designprompt": "dark, moody, clean",
+        "apiKey": "secret-key-12345",
+        "debugMode": true
+    },
+    "1": {
+        "h1": "Welcome to JSON Server",
+        "p": "This demonstrates all the new features!"
+    },
+    "2": {
+        "h2": "Standard HTML Tags",
+        "p": "These render normally as HTML elements",
+        "ul": [
+            "Fast Go Server",
+            "Dynamic Content",
+            "AI Design Mode"
+        ]
+    },
+    "3": {
+        "h2": "Custom Components",
+        "card": "This uses the card.html template to render beautifully!",
+        "p": "The card above is rendered using a custom component template."
+    },
+    "4": {
+        "h2": "Non-Standard Tags (JavaScript Variables)",
+        "customData": {
+            "message": "This will be in JavaScript!",
+            "count": 42,
+            "active": true
+        },
+        "metadata": "This is also a non-standard tag",
+        "p": "The customData and metadata above are NOT rendered as HTML. They're available in JavaScript as customContent.customData and customContent.metadata"
+    },
+    "5": {
+        "h2": "Testing Instructions",
+        "p": "Open the browser console (F12) and type: console.log(customContent)"
+    }
+}
