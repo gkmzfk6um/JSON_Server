@@ -1,0 +1,4 @@
+*.exe~
+*.exe
+/components/cached/*
+/main.exe

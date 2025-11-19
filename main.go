@@ -15,11 +15,34 @@ import (
 	"strings"
 )
 
-// ContentItem represents the content inside the ID object
-type ContentItem map[string]interface{}
+// OrderedPair represents a key-value pair with preserved order
+type OrderedPair struct {
+	Key   string
+	Value interface{}
+}
+
+// ContentItem represents the content inside the ID object with preserved order
+type ContentItem struct {
+	ID      string
+	Content []OrderedPair
+}
 
 var aiDesign bool
 var templates *template.Template
+
+func serveFavicon(w http.ResponseWriter, r *http.Request) {
+	//adjust content type if you use .ico instead
+	w.Header().Set("Content-Type", "image/png")
+
+	data, err := ioutil.ReadFile("assets/favicon.png")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+}
 
 func main() {
 	flag.BoolVar(&aiDesign, "ai-design", false, "Enable AI design mode for enhanced styling")
@@ -27,6 +50,11 @@ func main() {
 
 	// Initial template parsing (default)
 	parseTemplates("")
+
+	http.HandleFunc("/favicon.ico", serveFavicon)
+	http.Handle("/assets/", http.StripPrefix("/assets/",
+		http.FileServer(http.Dir("assets")),
+	))
 
 	http.HandleFunc("/", handler)
 
@@ -75,14 +103,26 @@ func parseTemplates(customUUID string) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	// Determine which JSON file to load
+	jsonFile := "index.json"
+
+	// Check if the path is /index.something
 	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
+		if strings.HasPrefix(r.URL.Path, "/index.") {
+			// Extract the name after /index.
+			name := strings.TrimPrefix(r.URL.Path, "/index.")
+			if name != "" {
+				jsonFile = "index." + name + ".json"
+			}
+		} else {
+			http.NotFound(w, r)
+			return
+		}
 	}
 
-	data, err := ioutil.ReadFile("index.json")
+	data, err := ioutil.ReadFile(jsonFile)
 	if err != nil {
-		http.Error(w, "Could not read index.json", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Could not read %s", jsonFile), http.StatusInternalServerError)
 		return
 	}
 
@@ -112,18 +152,129 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract content items (everything except "flags")
-	contentItems := make([]map[string]interface{}, 0)
-	for key, value := range jsonData {
-		if key == "flags" {
-			continue
-		}
-		if contentMap, ok := value.(map[string]interface{}); ok {
-			contentItems = append(contentItems, contentMap)
-		}
+	// Parse JSON to extract key order
+	contentItems, err := parseOrderedJSON(data)
+	if err != nil {
+		http.Error(w, "Could not parse JSON with order: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	renderHTML(w, contentItems, flags)
+}
+
+// parseOrderedJSON parses JSON while preserving the order of keys
+func parseOrderedJSON(data []byte) ([]ContentItem, error) {
+	// First, parse normally to get the data
+	var jsonData map[string]interface{}
+	if err := json.Unmarshal(data, &jsonData); err != nil {
+		return nil, err
+	}
+
+	// Extract the order of keys from the raw JSON
+	keyOrder := extractJSONKeyOrder(string(data))
+
+	// Build content items in order
+	var contentItems []ContentItem
+	for _, topKey := range keyOrder {
+		if topKey == "flags" {
+			continue
+		}
+
+		if contentMap, ok := jsonData[topKey].(map[string]interface{}); ok {
+			// Get the order of keys within this content item
+			innerKeyOrder := extractInnerKeyOrder(string(data), topKey)
+
+			var pairs []OrderedPair
+			for _, innerKey := range innerKeyOrder {
+				if value, exists := contentMap[innerKey]; exists {
+					pairs = append(pairs, OrderedPair{Key: innerKey, Value: value})
+				}
+			}
+			contentItems = append(contentItems, ContentItem{
+				ID:      topKey,
+				Content: pairs,
+			})
+		}
+	}
+
+	return contentItems, nil
+}
+
+// extractJSONKeyOrder extracts the order of top-level keys from raw JSON
+func extractJSONKeyOrder(jsonStr string) []string {
+	var keys []string
+	decoder := json.NewDecoder(strings.NewReader(jsonStr))
+
+	// Read opening brace
+	decoder.Token()
+
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		if key, ok := token.(string); ok {
+			keys = append(keys, key)
+			// Skip the value
+			var dummy interface{}
+			decoder.Decode(&dummy)
+		}
+	}
+
+	return keys
+}
+
+// extractInnerKeyOrder extracts the order of keys within a specific object
+func extractInnerKeyOrder(jsonStr string, objectKey string) []string {
+	var keys []string
+
+	// Find the object in the JSON string
+	// This is a simplified approach - look for "objectKey": {
+	searchStr := fmt.Sprintf("\"%s\":", objectKey)
+	idx := strings.Index(jsonStr, searchStr)
+	if idx == -1 {
+		return keys
+	}
+
+	// Find the opening brace after the key
+	startIdx := strings.Index(jsonStr[idx:], "{")
+	if startIdx == -1 {
+		return keys
+	}
+	startIdx += idx + 1
+
+	// Extract the substring for this object
+	braceCount := 1
+	endIdx := startIdx
+	for endIdx < len(jsonStr) && braceCount > 0 {
+		if jsonStr[endIdx] == '{' {
+			braceCount++
+		} else if jsonStr[endIdx] == '}' {
+			braceCount--
+		}
+		endIdx++
+	}
+
+	objectStr := jsonStr[startIdx : endIdx-1]
+
+	// Parse the keys from this substring
+	decoder := json.NewDecoder(strings.NewReader("{" + objectStr + "}"))
+	decoder.Token() // Read opening brace
+
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		if key, ok := token.(string); ok {
+			keys = append(keys, key)
+			// Skip the value
+			var dummy interface{}
+			decoder.Decode(&dummy)
+		}
+	}
+
+	return keys
 }
 
 func getOrGenerateDesign(prompt string) string {
@@ -194,19 +345,6 @@ func generateTemplates(dir, prompt string) {
 		font = "Georgia, serif"
 	}
 
-	// Generate a custom style block (we'll inject this via a special template or just rely on main layout if we had one)
-	// Since we don't have a master layout file in the current setup (it's hardcoded in renderHTML),
-	// we might need to generate a 'layout.html' if we refactored, but for now let's generate component overrides.
-
-	// Actually, the current renderHTML hardcodes the HTML structure.
-	// To support "AI Design", we should probably allow overriding the "structure" or at least the CSS.
-	// The user said: "generate custom versiones of the default elements".
-
-	// Let's generate a 'style.html' that we can include if we change renderHTML to look for it,
-	// OR we can just generate component templates like 'h1.html', 'div.html' with inline styles or classes.
-
-	// For this implementation, let's generate a 'css_override.html' and 'h1.html' as examples.
-
 	// H1 Template
 	h1Content := fmt.Sprintf(`<h1 style="color: %s; font-family: %s; border-bottom: 2px solid %s;">{{.}}</h1>`, accentColor, font, accentColor)
 	ioutil.WriteFile(filepath.Join(dir, "h1.html"), []byte(h1Content), 0644)
@@ -214,23 +352,15 @@ func generateTemplates(dir, prompt string) {
 	// Div Template
 	divContent := fmt.Sprintf(`<div style="background: %s; color: %s; padding: 20px; border-radius: 8px; margin: 10px 0;">{{.}}</div>`, bgColor, textColor)
 	ioutil.WriteFile(filepath.Join(dir, "div.html"), []byte(divContent), 0644)
-
-	// We can also generate a special "style" template that renderHTML can check for?
-	// Or better, let's just generate these component overrides for now as requested.
 }
 
 func generateUUID() string {
-	// b := make([]byte, 16)
-
-	// In a real app use crypto/rand, here simple is fine or just use md5 of time
-	// For simplicity let's use a pseudo-random approach or just a simple unique string
-	// Using MD5 of current time + randomish
 	h := md5.New()
 	h.Write([]byte(fmt.Sprintf("%d", os.Getpid())))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func renderHTML(w http.ResponseWriter, items []map[string]interface{}, flags map[string]interface{}) {
+func renderHTML(w http.ResponseWriter, items []ContentItem, flags map[string]interface{}) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	htmlStart := `<!DOCTYPE html>
@@ -239,7 +369,30 @@ func renderHTML(w http.ResponseWriter, items []map[string]interface{}, flags map
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JSON Server</title>
-    <style>
+`
+
+	// Add CSS library if specified in flags
+	if cssLib, ok := flags["csslib"]; ok && cssLib != nil {
+		cssLibStr := fmt.Sprintf("%v", cssLib)
+		switch strings.ToLower(cssLibStr) {
+		case "bootstrap":
+			htmlStart += `    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+`
+		case "tailwind":
+			htmlStart += `    <script src="https://cdn.tailwindcss.com"></script>
+`
+		case "bulma":
+			htmlStart += `    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+`
+		case "materialize":
+			htmlStart += `    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+`
+		}
+	}
+
+	htmlStart += `    <style>
         body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; }
         img { max-width: 100%; height: auto; }
     </style>
@@ -259,7 +412,10 @@ func renderHTML(w http.ResponseWriter, items []map[string]interface{}, flags map
 
 	// First pass: collect non-standard tags
 	for _, item := range items {
-		for tag, content := range item {
+		for _, pair := range item.Content {
+			tag := pair.Key
+			content := pair.Value
+
 			// Check if it's a standard tag or has a template
 			hasTemplate := false
 			if templates != nil {
@@ -290,28 +446,20 @@ func renderHTML(w http.ResponseWriter, items []map[string]interface{}, flags map
 	}
 
 	if aiDesign {
-		htmlStart += `
-    <style>
-        /* AI Design Mode Base Styles */
-        body {
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            min-height: 100vh;
-        }
-        .container {
-            background: rgba(255,255,255,0.8);
-            padding: 40px;
-            border-radius: 12px;
-            margin-top: 40px;
-        }
-    </style>
-`
+		htmlStart += ``
 	}
 
 	htmlStart += `</head><body><div class="container">`
 	fmt.Fprint(w, htmlStart)
 
 	for _, item := range items {
-		for tag, content := range item {
+		// Wrap each numbered object in a div
+		fmt.Fprintf(w, "<div id='%s'>", item.ID)
+
+		for _, pair := range item.Content {
+			tag := pair.Key
+			content := pair.Value
+
 			// Check if a template exists for this tag
 			if templates != nil {
 				if tmpl := templates.Lookup(tag + ".html"); tmpl != nil {
@@ -354,6 +502,9 @@ func renderHTML(w http.ResponseWriter, items []map[string]interface{}, flags map
 				fmt.Fprintf(w, `<%s>%s</%s>`, tag, val, tag)
 			}
 		}
+
+		// Close the div wrapper
+		fmt.Fprint(w, "</div>")
 	}
 
 	fmt.Fprint(w, `</div></body></html>`)

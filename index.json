@@ -1,8 +1,10 @@
 {
     "flags": {
         "ai-design": false,
-        "designprompt": "dark, moody, clean",
-        "nocss": false
+        "designprompt": "clean, simple, modern, minimal, flat design",
+        "csslib": "bootstrap",
+        "apiKey": "secret-key-12345",
+        "debugMode": false
     },
     "2": {
         "h1": "title",
@@ -17,8 +19,13 @@
         ],
         "card": "This is a custom card component rendered via template!"
     },
-    "4": {
+    "1": {
         "h1": "title",
         "p": "This content is dynamically rendered from a JSON file. The order is determined by the file order."
+    },
+    "metadata": {
+        "title": "JSON Server - Feature Demonstration",
+        "description": "This page demonstrates the features of the JSON Server.",
+        "img": "assets/favicon.png"
     }
 }
