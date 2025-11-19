@@ -2,3 +2,4 @@
 *.exe
 /components/cached/*
 /main.exe
+/assets/*
